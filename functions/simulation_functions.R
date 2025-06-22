@@ -2,6 +2,24 @@
 library(dplyr)
 library(purrr)
 library(MASS)
+# library(pscl) # For ZINB, if using pscl::rzinb. Or use custom function.
+# library(countreg) # For ZINB using gamlss::rzinb
+
+# Function to generate Zero-Inflated Negative Binomial (ZINB) random variables
+# n: number of observations
+# mu: mean of the negative binomial part
+# theta: dispersion parameter of the negative binomial part (size)
+# pi: zero-inflation probability
+rzinb_custom <- function(n, mu, theta, pi) {
+  # Generate from Negative Binomial
+  nb_counts <- rnbinom(n, size = theta, mu = mu)
+  # Generate zero-inflation component
+  is_zero <- rbinom(n, size = 1, prob = pi)
+  # Combine: if is_zero is 1, then count is 0, otherwise it's from NB
+  counts <- ifelse(is_zero == 1, 0, nb_counts)
+  return(counts)
+}
+
 
 # Function to generate synthetic data for simulations
 # Sample size is sample for simulation 
@@ -16,11 +34,14 @@ sim_data_generate <- function(sample_size = 1000,
                               outcome_interaction = FALSE,
                               outcome_sd = 10, 
                               data_application = FALSE,
-                              data_app_sample = NULL) {
+                              data_app_sample = NULL,
+                              zinb_mu = 5,      # Default mean for ZINB
+                              zinb_theta = 1,   # Default dispersion for ZINB
+                              zinb_pi = 0.3) {  # Default zero-inflation probability for ZINB
   
   # Make sure input parameters are correct
-  if (!gps_mod %in% 1:4) {
-    stop("Invalid value for gps_mod. It should be in 1:4.")
+  if (!gps_mod %in% 1:5) { # Updated to include 5 for ZINB
+    stop("Invalid value for gps_mod. It should be in 1:5.")
   }
   
   if (!exposure_response_relationship %in% c("linear", "sublinear", "threshold")) {
@@ -45,21 +66,50 @@ sim_data_generate <- function(sample_size = 1000,
       rename_with(~ paste0("cf", 1:6))
     
     # Generate appropriate exposure based on gps_mod
-    exposure_df <- 
-      tibble(confounders_large) %>%
-      mutate(
-        exposure = case_when(
-          gps_mod == 1 ~ 9 * cov_function(confounders_large) + 18 + rnorm(sample_size, 0, sqrt(10)),
-          gps_mod == 2 ~ 9 * cov_function(confounders_large) + 18 + sqrt(5) * rt(sample_size, df = 3),
-          gps_mod == 3 ~ 9 * cov_function(confounders_large) + 15 + 2 * (confounders_large[, "cf3"])^2 + rnorm(sample_size, 0, sqrt(10)),
-          gps_mod == 4 ~ 9 * cov_function(confounders_large) + 2 * confounders_large[, "cf3"]^2 + 2 * confounders_large[, "cf1"] * confounders_large[, "cf4"] + 15 + rnorm(sample_size, 0, sqrt(10))
-        )
-      ) %>%
-      filter(exposure > 0) %>%
-      slice_sample(n = sample_size, replace = FALSE) %>%
-      dplyr::select(exposure, starts_with("cf"))
+    # Note: Using 2*sample_size for initial generation, then filtering and sampling.
     
-    # Now seperate out exposure and confounders, name cf for brevity
+    common_linear_term <- cov_function(confounders_large) # This is applied to 2*sample_size rows
+
+    if (gps_mod %in% 1:4) {
+      exposure_values_raw <-
+        case_when(
+          # Ensure rhs of ~ matches length of confounders_large (i.e. 2*sample_size)
+          gps_mod == 1 ~ 9 * common_linear_term + 18 + rnorm(2 * sample_size, 0, sqrt(10)),
+          gps_mod == 2 ~ 9 * common_linear_term + 18 + sqrt(5) * rt(2 * sample_size, df = 3),
+          gps_mod == 3 ~ 9 * common_linear_term + 15 + 2 * (confounders_large[, "cf3"])^2 + rnorm(2 * sample_size, 0, sqrt(10)),
+          gps_mod == 4 ~ 9 * common_linear_term + 2 * confounders_large[, "cf3"]^2 + 2 * confounders_large[, "cf1"] * confounders_large[, "cf4"] + 15 + rnorm(2 * sample_size, 0, sqrt(10))
+        )
+
+      exposure_df <-
+        tibble(confounders_large, exposure_raw = exposure_values_raw) %>%
+        filter(exposure_raw > 0) %>%
+        slice_sample(n = sample_size, replace = ifelse(nrow(.) < sample_size, TRUE, FALSE)) %>%
+        rename(exposure = exposure_raw) %>%
+        dplyr::select(exposure, starts_with("cf"))
+
+    } else if (gps_mod == 5) { # ZINB model
+      log_mu_base <- log(zinb_mu) # Use the zinb_mu parameter from function arguments
+
+      # common_linear_term is already calculated based on confounders_large (2*sample_size)
+      log_mu_nb_values <- log_mu_base + (common_linear_term / 2)
+      mu_nb_values <- exp(log_mu_nb_values)
+
+      mu_nb_values <- pmin(mu_nb_values, 50)
+      mu_nb_values[mu_nb_values <= 0.01] <- 0.01
+
+      exposure_values_raw <- rzinb_custom(n = 2 * sample_size, # Matches length of mu_nb_values
+                                          mu = mu_nb_values,
+                                          theta = zinb_theta, # zinb_theta from function arguments
+                                          pi = zinb_pi)       # zinb_pi from function arguments
+
+      exposure_df <-
+        tibble(confounders_large, exposure_raw = exposure_values_raw) %>%
+        slice_sample(n = sample_size, replace = FALSE) %>%
+        rename(exposure = exposure_raw) %>%
+        dplyr::select(exposure, starts_with("cf"))
+    }
+
+    # Now separate out exposure and confounders, name cf for brevity
     exposure <- exposure_df$exposure
     cf <- as.matrix(exposure_df %>% dplyr::select(-exposure))
   } else {

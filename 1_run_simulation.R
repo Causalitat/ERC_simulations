@@ -57,9 +57,18 @@ sim_convergence <- tibble()
 # loop through all sample sizes included
 for (sample_size in c(200, 1000, 10000)) {
   message(paste("Running with sample size", sample_size))
-  # loop through all gps model specifications
-  for (gps_mod in 1:4) {
+  # loop through all gps model specifications (now includes 5 for ZINB)
+  for (gps_mod in 1:5) {
     message(paste("Running with gps model", gps_mod))
+
+    # Specific parameters for ZINB (gps_mod == 5).
+    # These are currently set to the defaults in sim_data_generate.
+    # They can be customized here if needed for specific simulation runs.
+    # e.g., zinb_params <- list(zinb_mu = 10, zinb_theta = 2, zinb_pi = 0.25)
+    # And then pass these to sim_data_generate:
+    # sim_data_generate(..., zinb_mu = zinb_params$zinb_mu, ...)
+    # For now, we rely on the defaults in sim_data_generate.
+
     # Loop through two different outcome relationships
     for (outcome_interaction in c("T", "F")) {
       

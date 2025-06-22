@@ -12,6 +12,41 @@ The main code scripts are as follows:
 * `/figures/` saves figures used in publication
 * `/markdown_files/` contains scripts used for exploratory data analysis and making additional plots
 
+## Toy Model for Understanding Simulations
+A new script `toy_model_simulation.R` has been added to help users understand the simulation process.
+* **Purpose**: This script runs a single, simplified simulation scenario. It is heavily commented to explain each step, from data generation to model fitting and results evaluation. It's an excellent starting point for new users to grasp the core mechanics before diving into the more complex, large-scale simulations.
+* **How to Run**:
+    1. Open `toy_model_simulation.R` in RStudio or your preferred R environment.
+    2. Modify the `REPO_DIR` variable at the top of the script if your working directory is not the root of the repository.
+    3. Adjust simulation parameters (e.g., `SAMPLE_SIZE`, `GPS_MODEL_SPEC`, `EXPOSURE_RESPONSE`) as desired to explore different scenarios.
+    4. Run the script. It will print output to the console and can be configured to save a plot of the estimated exposure-response curve.
+* **Key Features**:
+    * Uses the same core functions (`sim_data_generate`, `metrics_from_data`) as the main simulation.
+    * Focuses on clarity and step-by-step execution.
+    * Allows easy experimentation with different simulation settings.
+
+## Simulation Details
+
+### Treatment Generation (`gps_mod`)
+The `gps_mod` parameter in `sim_data_generate` (within `functions/simulation_functions.R`) controls how the exposure (treatment) is generated based on covariates. The following options are available:
+
+*   `gps_mod = 1`: Linear relationship with normal error. Exposure ~ β0 + βX + N(0, σ^2).
+*   `gps_mod = 2`: Linear relationship with t-distributed error. Exposure ~ β0 + βX + t(df).
+*   `gps_mod = 3`: Non-linear relationship (quadratic term) with normal error. Exposure ~ β0 + βX + β_k*X_k^2 + N(0, σ^2).
+*   `gps_mod = 4`: Non-linear relationship (quadratic and interaction terms) with normal error. Exposure ~ β0 + βX + β_k*X_k^2 + β_ij*X_i*X_j + N(0, σ^2).
+*   `gps_mod = 5`: Zero-Inflated Negative Binomial (ZINB) distribution.
+    *   This option generates count data with excess zeros, which can be useful for modeling treatments that are often zero but positive otherwise.
+    *   The mean of the Negative Binomial component (μ_NB) is modeled as a function of covariates: `μ_NB = exp(log(zinb_mu_base) + common_linear_term / 2)`.
+    *   The ZINB generation uses the following parameters (which can be passed to `sim_data_generate`):
+        *   `zinb_mu` (Default: 5): The base mean for the Negative Binomial component. The actual mean for each observation will vary based on its covariates.
+        *   `zinb_theta` (Default: 1): The dispersion parameter (size) for the Negative Binomial component. Higher values mean less dispersion.
+        *   `zinb_pi` (Default: 0.3): The zero-inflation probability. This is the probability that an observation is an "excess" zero, regardless of the NB component.
+
+### Outcome Generation
+The outcome `Y` is generated based on the exposure, confounders, and specified error distribution. Key parameters include:
+* `exposure_response_relationship`: Defines the true functional form between exposure and outcome (e.g., "linear", "sublinear", "threshold").
+* `outcome_interaction`: A boolean (`TRUE`/`FALSE`) indicating whether there's an interaction term between the (transformed) exposure and some confounders in the true outcome model.
+
 ## Data application
 Code related to fitting model to Medicare database is found in `/data_application/`
 
